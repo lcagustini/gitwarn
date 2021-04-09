@@ -1,0 +1,15 @@
+[package]
+name = "gitwarn"
+version = "0.1.0"
+authors = ["lcagustini <lucas.c.agustini@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serenity = { default-features = false, version = "0.10", features = ["builder", "cache", "client", "gateway", "http", "model", "standard_framework", "utils", "rustls_backend"] }
+tracing = "0.1.23"
+tracing-subscriber = "0.2"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+git2 = "0.13"
+dotenv = "0.15.0"
