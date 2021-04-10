@@ -1,92 +1,62 @@
-use serenity::{
-    async_trait,
-    model::{channel::Message, gateway::Ready},
-    prelude::*,
-    utils::MessageBuilder,
-};
-use serenity::framework::standard::{
-    StandardFramework,
-    macros::{
-        group
-    }
-};
+use serenity::model::id::ChannelId;
+use serenity::http::client::Http;
 use git2::Repository;
+use std::time::Duration;
 use std::thread;
 use std::env;
 use dotenv;
 
-#[group]
-struct General;
-
-struct Handler;
-
-#[async_trait]
-impl EventHandler for Handler {
-    async fn message(&self, context: Context, msg: Message) {
-        if msg.content == "aping" {
-            let channel = match msg.channel_id.to_channel(&context).await {
-                Ok(channel) => channel,
-                Err(why) => {
-                    println!("Error getting channel: {:?}", why);
-
-                    return;
-                },
-            };
-
-            // The message builder allows for creating a message by
-            // mentioning users dynamically, pushing "safe" versions of
-            // content (such as bolding normalized content), displaying
-            // emojis, and more.
-            let response = MessageBuilder::new()
-                .push("User ")
-                .push_bold_safe(&msg.author.name)
-                .push(" used the 'ping' command in the ")
-                .mention(&channel)
-                .push(" channel")
-                .build();
-
-            if let Err(why) = msg.channel_id.say(&context.http, &response).await {
-                println!("Error sending message: {:?}", why);
-            }
-        }
-    }
-
-    async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
-    }
-}
-
 #[tokio::main]
 async fn main() {
-    let framework = StandardFramework::new()
-        //.configure(|c| c.prefix("!")) // set the bot's prefix to "~"
-        .group(&GENERAL_GROUP);
-
-    // Configure the client with your Discord bot token in the environment.
-    dotenv::dotenv();
+    let _ = dotenv::dotenv();
     let token = env::var("DISCORD_TOKEN").expect("token");
-    let mut client = Client::builder(&token)
-        .framework(framework)
-        .event_handler(Handler)
-        .await
-        .expect("Err creating client");
 
-    let repo = match Repository::open("/home/lucas/Documents/blissys-client/") {
+    let client = Http::new_with_token(&token);
+
+    let repo = match Repository::open("/home/lucas/Documents/test/") {
         Ok(repo) => repo,
         Err(e) => panic!("failed to open: {}", e),
     };
 
-    thread::spawn(move || {
-        loop {
-            thread::sleep_ms(1000);
+    loop {
+        thread::sleep(Duration::new(10, 0));
 
-            println!("{:?}", repo.head().unwrap().peel_to_commit().unwrap().id());
-            repo.find_remote("origin").unwrap().fetch(&["master"], None, None);
-            println!("{:?}", repo.head().unwrap().peel_to_commit().unwrap().id());
+        let id = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let _ = fast_forward(&repo).map_err(|e| println!("{:?}", e));
+        let new_id = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        if id != new_id {
+            let _ = ChannelId::from(829837845916549165).say(&client, format!("Someone pushed to develop! Now at {}", new_id)).await;
         }
-    });
-
-    if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
     }
 }
+
+fn fast_forward(repo: &Repository) -> Result<(), git2::Error> {
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.credentials(|_, _, _| {
+        let user = env::var("GIT_USER").expect("user");
+        let pass = env::var("GIT_PASSWORD").expect("pass");
+        return git2::Cred::userpass_plaintext(&user, &pass);
+    });
+
+    let mut opts = git2::FetchOptions::new();
+    opts.remote_callbacks(callbacks);
+
+    let _ = repo.find_remote("origin")?.fetch(&["master"], Some(&mut opts), None)?;
+
+    let fetch_head = repo.find_reference("FETCH_HEAD")?;
+    let fetch_commit = repo.reference_to_annotated_commit(&fetch_head)?;
+    let analysis = repo.merge_analysis(&[&fetch_commit])?;
+    if analysis.0.is_up_to_date() {
+        Ok(())
+    } else if analysis.0.is_fast_forward() {
+        let refname = format!("refs/heads/{}", "master");
+        let mut reference = repo.find_reference(&refname)?;
+        reference.set_target(fetch_commit.id(), "Fast-Forward")?;
+        repo.set_head(&refname)?;
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+    } else {
+        Err(git2::Error::from_str("Fast-forward only!"))
+    }
+}
+
