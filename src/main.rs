@@ -56,10 +56,10 @@ impl Watcher {
 
             let id = self.repo.head().unwrap().peel_to_commit().unwrap().id();
             let _ = self.fast_forward().map_err(|e| println!("{:?}", e));
-            let new_id = self.repo.head().unwrap().peel_to_commit().unwrap().id();
+            let new_commit = self.repo.head().unwrap().peel_to_commit().unwrap();
 
-            if id != new_id {
-                let _ = ChannelId::from(829837845916549165).say(&client, format!("Someone pushed to develop! Now at {}", new_id)).await;
+            if id != new_commit.id() {
+                let _ = ChannelId::from(829837845916549165).say(&client, format!("{} pushed to develop! Now at {}", new_commit.author().name().unwrap_or("Someone"), new_commit.id())).await;
             }
         }
     }
