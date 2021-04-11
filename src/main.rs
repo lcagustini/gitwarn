@@ -6,6 +6,30 @@ use std::thread;
 use std::env;
 use dotenv;
 
+pub struct Error {
+    pub msg: String,
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        return write!(f, "{}", self.msg);
+    }
+}
+impl From<git2::Error> for Error {
+    fn from(error: git2::Error) -> Self {
+        return Error { msg: error.to_string() };
+    }
+}
+impl From<env::VarError> for Error {
+    fn from(error: env::VarError) -> Self {
+        return Error { msg: error.to_string() };
+    }
+}
+impl From<core::num::ParseIntError> for Error {
+    fn from(error: core::num::ParseIntError) -> Self {
+        return Error { msg: error.to_string() };
+    }
+}
+
 pub struct Watcher {
     pub branch: String,
     pub repo: Repository,
@@ -19,7 +43,7 @@ impl Watcher {
         return Watcher { branch: branch, repo: repo };
     }
 
-    fn fast_forward(&self) -> Result<(), git2::Error> {
+    fn fast_forward(&self) -> Result<(), Error> {
         let mut callbacks = git2::RemoteCallbacks::new();
         callbacks.credentials(|_, _, _| {
             let user = env::var("GIT_USER").expect("user");
@@ -36,30 +60,31 @@ impl Watcher {
         let fetch_commit = self.repo.reference_to_annotated_commit(&fetch_head)?;
         let analysis = self.repo.merge_analysis(&[&fetch_commit])?;
         if analysis.0.is_up_to_date() {
-            Ok(())
+            return Ok(());
         } else if analysis.0.is_fast_forward() {
             let refname = format!("refs/heads/{}", self.branch);
             let mut reference = self.repo.find_reference(&refname)?;
             reference.set_target(fetch_commit.id(), "Fast-Forward")?;
             self.repo.set_head(&refname)?;
-            self.repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+            return Ok(self.repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?);
         } else {
-            Err(git2::Error::from_str("Fast-forward only!"))
+            return Err(Error { msg: "Fast-forward only!".to_string() });
         }
     }
 
-    pub async fn watch(self) {
-        let token = env::var("DISCORD_TOKEN").expect("token");
+    pub async fn watch(self) -> Result<(), Error> {
+        let token = env::var("DISCORD_TOKEN")?;
         let client = Http::new_with_token(&token);
         loop {
             thread::sleep(Duration::new(10, 0));
 
-            let id = self.repo.head().unwrap().peel_to_commit().unwrap().id();
-            let _ = self.fast_forward().map_err(|e| println!("{:?}", e));
-            let new_commit = self.repo.head().unwrap().peel_to_commit().unwrap();
+            let id = self.repo.head()?.peel_to_commit()?.id();
+            self.fast_forward()?;
+            let new_commit = self.repo.head()?.peel_to_commit()?;
 
             if id != new_commit.id() {
-                let _ = ChannelId::from(829837845916549165).say(&client, format!("{} pushed to develop! Now at {}", new_commit.author().name().unwrap_or("Someone"), new_commit.id())).await;
+                let channel_id = env::var("CHANNEL_ID")?;
+                let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, format!("{} pushed to develop! Now at {}", new_commit.author().name().unwrap_or("Someone"), new_commit.id())).await;
             }
         }
     }
@@ -70,5 +95,8 @@ async fn main() {
     let _ = dotenv::dotenv();
 
     let watcher = Watcher::new("/home/lucas/Documents/test", "master".to_string());
-    watcher.watch().await;
+    match watcher.watch().await {
+        Err(e) => println!("{}", e),
+        _ => (),
+    }
 }
