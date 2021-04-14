@@ -82,9 +82,11 @@ impl Watcher {
             self.fast_forward()?;
             let new_commit = self.repo.head()?.peel_to_commit()?;
 
+            println!("before: {} - after: {}", id, new_commit.id());
+
             if id != new_commit.id() {
                 let channel_id = env::var("CHANNEL_ID")?;
-                let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, format!("{} pushed to develop! Now at {}", new_commit.author().name().unwrap_or("Someone"), new_commit.id())).await;
+                let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, format!("{} pushed to develop: {}", new_commit.author().name().unwrap_or("Someone"), new_commit.summary().unwrap_or("No message"))).await;
             }
         }
     }
@@ -94,9 +96,11 @@ impl Watcher {
 async fn main() {
     let _ = dotenv::dotenv();
 
-    let watcher = Watcher::new("/home/lucas/Documents/test", "master".to_string());
-    match watcher.watch().await {
-        Err(e) => println!("{}", e),
-        _ => (),
+    loop {
+        let watcher = Watcher::new("/home/pi/shared/spacelines", "develop".to_string());
+        match watcher.watch().await {
+            Err(e) => println!("{}", e),
+            _ => (),
+        }
     }
 }
