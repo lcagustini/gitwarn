@@ -31,19 +31,35 @@ impl From<core::num::ParseIntError> for Error {
 }
 
 pub struct Watcher {
-    pub branch: String,
+    pub branches: Vec<String>,
     pub repo: Repository,
 }
 impl Watcher {
-    pub fn new(path: &str, branch: String) -> Watcher {
+    pub fn new(path: &str) -> Watcher {
         let repo = match Repository::open(path) {
             Ok(repo) => repo,
             Err(e) => panic!("failed to open: {}", e),
         };
-        return Watcher { branch: branch, repo: repo };
+        let branches = repo.branches(Some(git2::BranchType::Local)).unwrap().map(|item| item.unwrap().0.name().unwrap().unwrap().to_string()).collect();
+        return Watcher { branches: branches, repo: repo };
     }
 
-    fn fast_forward(&self) -> Result<(), Error> {
+    fn checkout(&self, branch: &str) -> Result<(), Error> {
+        let (object, reference) = self.repo.revparse_ext(branch)?;
+
+        self.repo.checkout_tree(&object, None)?;
+
+        match reference {
+            // gref is an actual reference like branches or tags
+            Some(gref) => self.repo.set_head(gref.name().unwrap()),
+            // this is a commit, not a reference
+            None => self.repo.set_head_detached(object.id()),
+        }?;
+
+        return Ok(());
+    }
+
+    fn fast_forward(&self, branch: &str) -> Result<(), Error> {
         let mut callbacks = git2::RemoteCallbacks::new();
         callbacks.credentials(|_, _, _| {
             let user = env::var("GIT_USER").expect("user");
@@ -54,7 +70,7 @@ impl Watcher {
         let mut opts = git2::FetchOptions::new();
         opts.remote_callbacks(callbacks);
 
-        let _ = self.repo.find_remote("origin")?.fetch(&[&self.branch], Some(&mut opts), None)?;
+        let _ = self.repo.find_remote("origin")?.fetch(&[branch], Some(&mut opts), None)?;
 
         let fetch_head = self.repo.find_reference("FETCH_HEAD")?;
         let fetch_commit = self.repo.reference_to_annotated_commit(&fetch_head)?;
@@ -62,7 +78,7 @@ impl Watcher {
         if analysis.0.is_up_to_date() {
             return Ok(());
         } else if analysis.0.is_fast_forward() {
-            let refname = format!("refs/heads/{}", self.branch);
+            let refname = format!("refs/heads/{}", branch);
             let mut reference = self.repo.find_reference(&refname)?;
             reference.set_target(fetch_commit.id(), "Fast-Forward")?;
             self.repo.set_head(&refname)?;
@@ -78,15 +94,18 @@ impl Watcher {
         loop {
             thread::sleep(Duration::new(10, 0));
 
-            let id = self.repo.head()?.peel_to_commit()?.id();
-            self.fast_forward()?;
-            let new_commit = self.repo.head()?.peel_to_commit()?;
+            for branch in self.branches.iter() {
+                self.checkout(branch)?;
+                let id = self.repo.head()?.peel_to_commit()?.id();
+                self.fast_forward(branch)?;
+                let new_commit = self.repo.head()?.peel_to_commit()?;
 
-            println!("before: {} - after: {}", id, new_commit.id());
+                println!("[{}] before: {} - after: {}", branch, id, new_commit.id());
 
-            if id != new_commit.id() {
-                let channel_id = env::var("CHANNEL_ID")?;
-                let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, format!("{} pushed to develop: {}", new_commit.author().name().unwrap_or("Someone"), new_commit.summary().unwrap_or("No message"))).await;
+                if id != new_commit.id() {
+                    let channel_id = env::var("CHANNEL_ID")?;
+                    let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, format!("{} pushed to {}: {}", new_commit.author().name().unwrap_or("Someone"), branch, new_commit.summary().unwrap_or("No message"))).await;
+                }
             }
         }
     }
@@ -97,7 +116,7 @@ async fn main() {
     let _ = dotenv::dotenv();
 
     loop {
-        let watcher = Watcher::new("/home/pi/shared/spacelines", "develop".to_string());
+        let watcher = Watcher::new("/home/pi/spacelines");
         match watcher.watch().await {
             Err(e) => println!("{}", e),
             _ => (),
