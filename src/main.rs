@@ -94,7 +94,7 @@ impl Watcher {
         loop {
             thread::sleep(Duration::new(10, 0));
 
-            for branch in self.branches.iter() {
+            for branch in &self.branches {
                 self.checkout(branch)?;
                 let id = self.repo.head()?.peel_to_commit()?.id();
                 self.fast_forward(branch)?;
@@ -105,6 +105,8 @@ impl Watcher {
                 if id != new_commit.id() {
                     let channel_id = env::var("CHANNEL_ID")?;
                     let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, format!("{} pushed to {}: {}", new_commit.author().name().unwrap_or("Someone"), branch, new_commit.summary().unwrap_or("No message"))).await;
+                    
+                    return Ok(());
                 }
             }
         }
