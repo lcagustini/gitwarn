@@ -1,11 +1,12 @@
 use serenity::model::id::ChannelId;
 use serenity::http::client::Http;
-use git2::Repository;
-use std::time::Duration;
-use std::thread;
+//use git2::Repository;
+//use std::time::Duration;
+//use std::thread;
 use std::env;
 use dotenv;
 
+#[derive(Debug)]
 pub struct Error {
     pub msg: String,
 }
@@ -30,6 +31,7 @@ impl From<core::num::ParseIntError> for Error {
     }
 }
 
+/*
 pub struct Watcher {
     pub branches: Vec<String>,
     pub repo: Repository,
@@ -124,4 +126,19 @@ async fn main() {
             _ => (),
         }
     }
+}
+*/
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    let args: Vec<String> = env::args().collect();
+    let _ = dotenv::dotenv();
+
+    let token = env::var("DISCORD_TOKEN")?;
+    let client = Http::new_with_token(&token);
+
+    let channel_id = env::var("CHANNEL_ID")?;
+    let _ = ChannelId::from(channel_id.parse::<u64>()?).say(&client, &args[1]).await;
+
+    return Ok(());
 }
