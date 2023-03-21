@@ -3,7 +3,7 @@
 source .env
 
 REPO="/home/lucas/spacelines"
-BRANCHES="develop-1.6 develop-1.5 develop-2.0 master"
+BRANCHES="develop-1.6 develop-1.7 develop-2.0 develop-2.1 master"
 
 cd $REPO
 
@@ -14,6 +14,8 @@ while true; do
 	done
 
 	for BRANCH in $BRANCHES; do
+		git reset --hard
+		git clean -f -d
 		git checkout $BRANCH
 		git pull
 	done
@@ -30,5 +32,5 @@ while true; do
 
 		echo $BRANCH": "${BEFORE[$BRANCH]}" -> "$AFTER
 	done
-	sleep 10
+	sleep 300
 done
